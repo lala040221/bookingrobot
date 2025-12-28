@@ -1,0 +1,10 @@
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Runtime files
+geckodriver.log
+last_notified_date.txt

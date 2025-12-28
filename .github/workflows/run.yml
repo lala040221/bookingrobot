@@ -1,0 +1,33 @@
+name: Rehab Bus Bot
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # 台灣時間 Tue/Thu/Sat 07:55 = UTC Mon/Wed/Fri 23:55
+    - cron: "55 23 * * 1,3,5"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      REHA_AC: ${{ secrets.REHA_AC }}
+      REHA_PS: ${{ secrets.REHA_PS }}
+      LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run bot
+        run: |
+          python entrypoint.py
