@@ -4,7 +4,7 @@ on:
   workflow_dispatch: {}
   schedule:
     # 台灣時間 Tue/Thu/Sat 07:55 = UTC Mon/Wed/Fri 23:55
-    - cron: "5 0 * * 2,4,6"
+    - cron: "1 0 * * 2,5,7"
 
 
 jobs:
