@@ -10,7 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 BASE_URL = "https://pub-tyn-reha-shihao.leaftech.tw/"
 TIME_SLOTS = ["11:15", "17:45"]          # 你要嘗試的時段
-VALID_WEEKDAYS = {1, 3, 5}               # Tue/Thu/Sat (Mon=0)
+VALID_WEEKDAYS = {0,1,2,3,4,5,6}               # Tue/Thu/Sat (Mon=0)
 
 
 def get_driver():
