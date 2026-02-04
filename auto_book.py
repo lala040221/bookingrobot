@@ -10,12 +10,12 @@ from selenium.webdriver.support import expected_conditions as EC
 
 BASE_URL = "https://pub-tyn-reha-shihao.leaftech.tw/"
 TIME_SLOTS = ["11:15", "17:45"]          # 你要嘗試的時段
-VALID_WEEKDAYS = {0,1,2,3,4,5,6}               # Tue/Thu/Sat (Mon=0)
+VALID_WEEKDAYS = {1,3,5}               # Tue/Thu/Sat (Mon=0)
 
 
 def get_driver():
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless=new")
+    #options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -55,53 +55,110 @@ def pick_valid_dates(driver):
         if d.weekday() in VALID_WEEKDAYS:
             valid.append((date_str, radio))
     return valid
+from selenium.common.exceptions import TimeoutException
 
+def click_confirm_submit(driver, wait):
+    driver.switch_to.default_content()
 
+    # 1) 進 selDay iframe
+    wait.until(EC.frame_to_be_available_and_switch_to_it((By.NAME, "selDay")))
+
+    # 2) 找到「確認訂車」submit
+    btn = wait.until(EC.presence_of_element_located(
+        (By.XPATH, "//input[@type='submit' and contains(@value,'確認訂車')]")
+    ))
+
+    # 3) 保險：捲到可視範圍 + JS click（避免被遮住/不可點）
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+    wait.until(EC.element_to_be_clickable(
+        (By.XPATH, "//input[@type='submit' and contains(@value,'確認訂車')]")
+    ))
+    driver.execute_script("arguments[0].click();", btn)
+    print("✅ 已點擊『確認訂車』")
+
+    driver.switch_to.default_content()
+
+    # 4) 如果網站有跳 confirm/alert，順便接受
+    try:
+        alert = WebDriverWait(driver, 3).until(EC.alert_is_present())
+        print("🟡 alert:", alert.text)
+        alert.accept()
+        print("✅ 已按下 alert OK/Yes")
+    except TimeoutException:
+        pass
+
+    return True
 def check_and_book(driver, wait, date_str, radio_elem, is_backup=False):
     print(f"▶ 檢查日期: {date_str} {'(候補)' if is_backup else ''}")
 
-    # 點日期 radio
     radio_elem.click()
-
-    # iframe 內容可能要等一下
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.NAME, "selDay")))
 
+    picked = []
     try:
-        # 依序嘗試時段
         for ts in TIME_SLOTS:
-            slot_cells = driver.find_elements(By.XPATH, f"//td[contains(., '{ts}')]")
-            if not slot_cells:
-                print(f"⚠ 找不到 {ts} 的欄位")
-                continue
+            clicked = False
+            for _ in range(3):
+                slot_cells = driver.find_elements(By.XPATH, f"//td[contains(normalize-space(.), '{ts}')]")
+                if not slot_cells:
+                    time.sleep(0.3)
+                    continue
 
-            booked_this_ts = False
-            for cell in slot_cells:
-                links = cell.find_elements(By.XPATH, ".//a[contains(., '可訂車')]")
-                if links:
-                    print(f"✅ {ts} 有空位，可預約")
-                    links[0].click()
-                    booked_this_ts = True
+                for cell in slot_cells:
+                    links = cell.find_elements(By.XPATH, ".//a[contains(., '可訂車')]")
+                    if links:
+                        print(f"✅ {ts} 有空位，可預約")
+                        links[0].click()
+                        picked.append(ts)
+                        clicked = True
+                        break
+
+                if clicked:
+                    time.sleep(0.5)  # 等頁面更新
                     break
 
-            if booked_this_ts:
-                # 點完「可訂車」通常會出現下一步
-                try:
-                    driver.switch_to.default_content()
-                    next_btn = wait.until(
-                        EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and @value='下一步']"))
-                    )
-                    next_btn.click()
-                    print("➡ 成功點擊『下一步』")
-                    return True
-                except Exception:
-                    print("❌ 沒找到『下一步』，可能已預約過或流程不同")
-                    return False
+                time.sleep(0.3)
 
-        print("🔍 兩個時段都沒有可訂車")
-        return False
+            if not clicked:
+                print(f"🔍 {ts} 沒有可訂車")
+
+        if len(picked) != len(TIME_SLOTS):
+            print(f"❌ 只成功點到 {picked}，未達成需要的 {TIME_SLOTS}，不按下一步")
+            return False
+
+        # 兩個都點到 -> 按下一步
+        # 先試 iframe 內
+        try:
+            next_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and (@value='下一步' or contains(@value,'下一步'))]"))
+            )
+            next_btn.click()
+            print("➡（iframe內）已成功點擊『下一步』")
+            return True
+        except Exception as e1:
+            print("⚠ iframe 內找不到『下一步』，改在外層找…", type(e1).__name__)
+
+        # 再試 iframe 外
+        driver.switch_to.default_content()
+        try:
+            next_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and (@value='下一步' or contains(@value,'下一步'))]"))
+            )
+            next_btn.click()
+            print("➡（外層）已成功點擊『下一步』")
+            return True
+        except Exception as e2:
+            print("❌ 外層也找不到『下一步』：", type(e2).__name__)
+            print("🔎 目前網址：", driver.current_url)
+            return False
 
     finally:
-        driver.switch_to.default_content()
+        # 確保離開 iframe
+        try:
+            driver.switch_to.default_content()
+        except Exception:
+            pass
+    
 
 
 def fill_trip_info_fixed(driver, wait):
@@ -130,7 +187,51 @@ def fill_trip_info_fixed(driver, wait):
 
     finally:
         driver.switch_to.default_content()
+        debug_buttons_everywhere(driver)
+def debug_buttons_everywhere(driver):
+    def dump_in_current_context(tag):
+        elems = driver.find_elements(By.TAG_NAME, tag)
+        print(f"\n---- <{tag}> count = {len(elems)} ----")
+        for i, el in enumerate(elems[:30]):  # 最多印 30 個避免爆量
+            txt = (el.text or "").strip()
+            t = el.get_attribute("type")
+            val = el.get_attribute("value")
+            name = el.get_attribute("name")
+            eid = el.get_attribute("id")
+            cls = el.get_attribute("class")
+            if tag == "input" and t not in ("submit", "button"):
+                continue
+            if tag in ("button", "a") and not txt and not val:
+                continue
+            print(i, f"type={t!r} value={val!r} text={txt!r} id={eid!r} name={name!r} class={cls!r}")
 
+    driver.switch_to.default_content()
+    print("\n========== DEBUG: default_content ==========")
+    dump_in_current_context("input")
+    dump_in_current_context("button")
+    dump_in_current_context("a")
+
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    print(f"\n========== DEBUG: iframes count = {len(iframes)} ==========")
+    for idx, fr in enumerate(iframes):
+        print(idx, "name=", fr.get_attribute("name"),
+                 "id=", fr.get_attribute("id"),
+                 "src=", fr.get_attribute("src"))
+
+    # 逐一進每個 iframe 掃按鈕
+    for idx in range(len(iframes)):
+        try:
+            driver.switch_to.default_content()
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")  # 重新抓，避免 stale
+            driver.switch_to.frame(iframes[idx])
+            print(f"\n========== DEBUG: inside iframe[{idx}] ==========")
+            dump_in_current_context("input")
+            dump_in_current_context("button")
+            dump_in_current_context("a")
+        except Exception as e:
+            print(f"⚠ iframe[{idx}] debug failed:", type(e).__name__)
+        finally:
+            driver.switch_to.default_content()
 
 def try_backup_flow(driver, wait):
     print("已額滿，嘗試候補")
@@ -146,20 +247,19 @@ def try_backup_flow(driver, wait):
         date_str = radio.get_attribute("value")
         d = datetime.strptime(date_str, "%Y-%m-%d")
         if d.weekday() in VALID_WEEKDAYS:
+            # ok = click_confirm_submit(driver, wait)
+            # if ok:
+            #     print("🎉 已嘗試送出（請到網站確認是否成功）")
+            #     return True
+            # else:
+            #     return False
             ok = check_and_book(driver, wait, date_str, radio, is_backup=True)
             if ok:
                 # 進到填表頁面：填行程 + 送出
                 fill_trip_info_fixed(driver, wait)
-                try:
-                    confirm_btn = wait.until(
-                        EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and contains(@value, '確認訂車')]"))
-                    )
-                    confirm_btn.click()
-                    print("✅ 已成功候補訂車")
-                    return True
-                except Exception as e:
-                    print("❌ 找不到『確認訂車』按鈕", e)
-                    return False
+                #fill_trip_info_fixed(driver, wait)
+                ok = click_confirm_submit(driver, wait)
+                return ok
 
     print("🔍 候補頁沒有符合星期二/四/六的日期")
     return False
