@@ -15,7 +15,7 @@ VALID_WEEKDAYS = {1,3,5}               # Tue/Thu/Sat (Mon=0)
 
 def get_driver():
     options = webdriver.ChromeOptions()
-    #options.add_argument("--headless=new")
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
